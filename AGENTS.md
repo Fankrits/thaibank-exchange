@@ -6,6 +6,7 @@ Bank of Thailand API and append them to a SQLite file. Managed with **uv**.
 ## Commands
 - `uv sync` — create `.venv` and install deps
 - `uv run bot-fx` — run the workflow (needs `BOT_API_TOKEN`)
+- `uv run bot-fx --dashboard` — run, then serve + open the dashboard; `uv run bot-fx-dashboard` — dashboard only (`serve.py`, 127.0.0.1, serves only the page + the one DB file, never `.env`)
 - `uv run pytest` — run tests (no network or token needed)
 
 ## Layout

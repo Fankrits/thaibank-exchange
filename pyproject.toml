@@ -13,6 +13,7 @@ dependencies = [
 
 [project.scripts]
 bot-fx = "bot_fx_workflow.cli:main"
+bot-fx-dashboard = "bot_fx_workflow.serve:main"
 
 [dependency-groups]
 dev = [

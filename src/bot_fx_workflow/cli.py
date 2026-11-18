@@ -26,6 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--days", type=int, default=DEFAULT_DATA_POINTS, help="number of daily data points (default 20)")
     p.add_argument("--lookback-days", type=int, default=DEFAULT_LOOKBACK_DAYS, help="max calendar days to look back (default 45, requested in <=31-day windows)")
     p.add_argument("--db-path", type=Path, help="override DB path (default .venv/bot_api_daily_<applicant>.db)")
+    p.add_argument("--dashboard", action="store_true", help="after the run, serve and open the dashboard (Ctrl+C to stop)")
     return p
 
 
@@ -58,4 +59,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {period}  {rate:.4f}")
     finally:
         conn.close()
+    if args.dashboard:
+        from bot_fx_workflow.serve import serve
+
+        return serve(settings.db_path)
     return 0

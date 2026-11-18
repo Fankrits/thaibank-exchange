@@ -109,3 +109,29 @@ def test_windows_never_exceed_31_days_and_stop_early(tmp_path):
         a, b = date.fromisoformat(params["start_period"]), date.fromisoformat(params["end_period"])
         assert (b - a).days + 1 <= 31
     assert date.fromisoformat(s.calls[1][1]["end_period"]) < date.fromisoformat(s.calls[0][1]["start_period"])
+
+
+def test_dashboard_server_serves_only_page_and_db(tmp_path):
+    import threading
+    import urllib.error
+    import urllib.request
+
+    from bot_fx_workflow.serve import make_server
+
+    db_file = tmp_path / "bot_api_daily_T.db"
+    db_file.write_bytes(b"SQLite format 3\x00fake")
+    page = tmp_path / "dash.html"
+    page.write_text("<html>dash</html>")
+    (tmp_path / ".env").write_text("BOT_API_TOKEN=secret")
+    srv = make_server(db_file, page, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_port}"
+    try:
+        assert urllib.request.urlopen(f"{base}/?db=bot_api_daily_T.db").read() == b"<html>dash</html>"
+        assert urllib.request.urlopen(f"{base}/bot_api_daily_T.db").read().startswith(b"SQLite format 3")
+        for bad in ("/.env", "/pyproject.toml", "/../.env"):
+            with pytest.raises(urllib.error.HTTPError) as e:
+                urllib.request.urlopen(base + bad)
+            assert e.value.code == 404
+    finally:
+        srv.shutdown()
