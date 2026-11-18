@@ -1,0 +1,27 @@
+[project]
+name = "bot-fx-workflow"
+version = "0.1.0"
+description = "Fetch the last 20 daily THB/USD weighted-average interbank rates from the Bank of Thailand API into SQLite"
+authors = [
+    { name = "Kritsada Nhanjeing" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "requests>=2.32",
+    "python-dotenv>=1.0",
+]
+
+[project.scripts]
+bot-fx = "bot_fx_workflow.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.0,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

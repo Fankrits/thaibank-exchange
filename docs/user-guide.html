@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>คู่มือการใช้งาน – BOT THB/USD Daily Rate → SQLite</title>
+<style>
+  :root{--fg:#1b1f24;--muted:#5b6672;--bg:#fafaf8;--card:#fff;--line:#e3e1db;--accent:#1f6f4a;--code:#f2f1ec}
+  *{box-sizing:border-box}
+  body{margin:0;font:16px/1.7 "Sarabun","Noto Sans Thai",system-ui,sans-serif;color:var(--fg);background:var(--bg)}
+  .wrap{max-width:860px;margin:0 auto;padding:32px 20px 80px}
+  header{border-bottom:2px solid var(--accent);padding-bottom:16px;margin-bottom:8px}
+  h1{margin:0 0 4px;font-size:1.8rem} h2{margin-top:2.4rem;font-size:1.3rem;border-left:4px solid var(--accent);padding-left:10px}
+  p.sub{margin:0;color:var(--muted)}
+  nav{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 18px;margin:20px 0}
+  nav a{color:var(--accent);text-decoration:none;margin-right:14px;white-space:nowrap}
+  pre,code{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:.9em}
+  code{background:var(--code);padding:1px 5px;border-radius:4px}
+  pre{background:#1d2127;color:#e8e6df;padding:14px 16px;border-radius:8px;overflow:auto}
+  pre code{background:none;padding:0;color:inherit}
+  table{border-collapse:collapse;width:100%;background:var(--card);margin:12px 0}
+  th,td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+  th{background:#f0efe9}
+  .note{background:#fff8e1;border:1px solid #ecd68a;border-radius:8px;padding:10px 14px;margin:14px 0}
+  .ok{background:#eaf5ee;border-color:#b6d9c4}
+  ol li,ul li{margin:4px 0}
+</style>
+</head>
+<body><div class="wrap">
+<header>
+  <h1>คู่มือการใช้งาน</h1>
+  <p class="sub">Python workflow ดึงอัตราแลกเปลี่ยน THB/USD รายวันจาก Bank of Thailand API เก็บลง SQLite</p>
+</header>
+
+<nav>
+  <a href="#overview">ภาพรวม</a><a href="#prereq">สิ่งที่ต้องมี</a><a href="#token">รับ API Token</a>
+  <a href="#setup">ติดตั้ง</a><a href="#run">การรัน</a><a href="#db">ฐานข้อมูล</a>
+  <a href="#options">ตัวเลือก</a><a href="#schedule">รันอัตโนมัติ</a><a href="#trouble">แก้ปัญหา</a>
+</nav>
+
+<h2 id="overview">1. ภาพรวม</h2>
+<table>
+  <tr><th>หัวข้อ</th><th>รายละเอียด</th></tr>
+  <tr><td>แหล่งข้อมูล</td><td><a href="https://portal.api.bot.or.th/portal/catalogue-products/exchange-rates-1">BOT API Portal – Exchange Rates</a></td></tr>
+  <tr><td>API</td><td>Weighted-average Interbank Exchange Rate – THB / USD</td></tr>
+  <tr><td>Endpoint</td><td><code>https://gateway.api.bot.or.th/Stat-ReferenceRate/v2/DAILY_REF_RATE/</code></td></tr>
+  <tr><td>ข้อมูลที่ดึง</td><td>ย้อนหลัง <b>20 data point</b> (รายวัน, เฉพาะวันทำการที่ BOT เผยแพร่)</td></tr>
+  <tr><td>ปลายทาง</td><td>SQLite <code>.venv/bot_api_daily_{ชื่อผู้สมัคร_Eng}.db</code> (append)</td></tr>
+  <tr><td>เครื่องมือ</td><td><code>uv</code></td></tr>
+</table>
+<p>ขั้นตอนการทำงานของโปรแกรมในหนึ่งครั้งที่รัน:</p>
+<ol>
+  <li>คำนวณช่วงวันที่: วันนี้ (เวลาไทย) ย้อนหลัง 45 วันปฏิทิน (ครอบคลุมเสาร์-อาทิตย์และวันหยุดนักขัตฤกษ์)</li>
+  <li>เรียก <code>GET DAILY_REF_RATE/?start_period=…&amp;end_period=…</code> พร้อม header <code>Authorization</code> (1 request)</li>
+  <li>เลือกเฉพาะ <b>20 วันล่าสุด</b> ที่มีข้อมูล</li>
+  <li>บันทึกลง SQLite: วันใหม่ถูก <b>append</b>, วันที่มีอยู่แล้วและค่าเท่าเดิมจะไม่ซ้ำ, ถ้า BOT แก้ตัวเลขจะอัปเดตค่านั้น</li>
+</ol>
+
+<h2 id="prereq">2. สิ่งที่ต้องมี</h2>
+<ul>
+  <li><a href="https://docs.astral.sh/uv/getting-started/installation/">uv</a> (จะติดตั้ง Python 3.12 ให้อัตโนมัติ)</li>
+  <li>บัญชีบน BOT API Portal และ API Token (ดูหัวข้อถัดไป)</li>
+</ul>
+
+<h2 id="token">3. รับ API Token</h2>
+<ol>
+  <li>สมัคร/เข้าสู่ระบบที่ <a href="https://portal.api.bot.or.th">portal.api.bot.or.th</a></li>
+  <li>สร้าง Application แล้ว Subscribe ผลิตภัณฑ์ <b>Exchange Rates</b> (Plan: 200 calls / ชั่วโมง)</li>
+  <li>คัดลอก Client ID / API key ของ Application — นี่คือค่า <code>BOT_API_TOKEN</code></li>
+</ol>
+<div class="note">โปรแกรมส่งค่านี้ใน header <code>Authorization: &lt;token&gt;</code> ตรง ๆ (ไม่ต้องมีคำว่า Bearer) และไม่ควร commit ลง Git</div>
+
+<h2 id="setup">4. ติดตั้ง</h2>
+<pre><code>git clone &lt;repo-url&gt; bot-fx-workflow
+cd bot-fx-workflow
+uv sync                 # สร้าง .venv และติดตั้ง dependencies
+cp .env.example .env    # แล้วแก้ไฟล์ .env</code></pre>
+<p>ไฟล์ <code>.env</code>:</p>
+<pre><code>BOT_API_TOKEN=ใส่_token_ของคุณ
+APPLICANT_NAME=Kritsada_Nhanjeing</code></pre>
+<p><code>APPLICANT_NAME</code> คือชื่อผู้สมัครภาษาอังกฤษ ใช้ตั้งชื่อไฟล์ฐานข้อมูล (ช่องว่าง/อักขระพิเศษจะถูกแปลงเป็น <code>_</code>)</p>
+
+<h2 id="run">5. การรัน</h2>
+<pre><code>uv run bot-fx</code></pre>
+<p>ตัวอย่างผลลัพธ์:</p>
+<pre><code>fetched 20 points (2026-10-22 .. 2026-11-18)
+inserted=20 updated=0 unchanged=0
+db: /path/to/project/.venv/bot_api_daily_Kritsada_Nhanjeing.db
+  2026-11-18  32.0000
+  ...</code></pre>
+<p>รันซ้ำได้ปลอดภัย: ครั้งถัดไปจะได้ <code>inserted=0 unchanged=20</code> (หรือ <code>inserted=1</code> เมื่อมีวันทำการใหม่)</p>
+<div class="note ok">ทดสอบโปรแกรมโดยไม่ต้องใช้ token/อินเทอร์เน็ต: <code>uv run pytest</code></div>
+
+<h2 id="db">6. ฐานข้อมูล</h2>
+<p>ที่อยู่ไฟล์: <code>.venv/bot_api_daily_{ชื่อผู้สมัคร_Eng}.db</code> ตาราง <code>daily_ref_rate</code></p>
+<table>
+  <tr><th>คอลัมน์</th><th>ชนิด</th><th>ความหมาย</th></tr>
+  <tr><td><code>period</code></td><td>TEXT (PK)</td><td>วันที่ <code>YYYY-MM-DD</code></td></tr>
+  <tr><td><code>rate</code></td><td>REAL</td><td>อัตราถัวเฉลี่ยถ่วงน้ำหนัก (บาท / 1 USD)</td></tr>
+  <tr><td><code>currency_pair</code></td><td>TEXT</td><td>THB/USD</td></tr>
+  <tr><td><code>source_api</code></td><td>TEXT</td><td>ชื่อ API ต้นทาง</td></tr>
+  <tr><td><code>fetched_at</code></td><td>TEXT</td><td>เวลา (UTC) ที่บันทึก/อัปเดตแถวนั้นล่าสุด</td></tr>
+</table>
+<p>ตัวอย่าง query:</p>
+<pre><code>sqlite3 .venv/bot_api_daily_Kritsada_Nhanjeing.db \
+  "SELECT period, rate FROM daily_ref_rate ORDER BY period DESC LIMIT 20;"</code></pre>
+<div class="note">ไฟล์ DB อยู่ใน <code>.venv</code> ตามโจทย์ — การลบ/สร้าง <code>.venv</code> ใหม่ (เช่น <code>rm -rf .venv</code>) จะทำให้ข้อมูลหาย ควรสำรองไฟล์ก่อน</div>
+
+<h2 id="options">7. ตัวเลือก</h2>
+<table>
+  <tr><th>Option / ENV</th><th>ค่าเริ่มต้น</th><th>คำอธิบาย</th></tr>
+  <tr><td><code>BOT_API_TOKEN</code></td><td>—</td><td>จำเป็น. API key ของ BOT</td></tr>
+  <tr><td><code>APPLICANT_NAME</code> / <code>--applicant</code></td><td><code>Kritsada_Nhanjeing</code></td><td>ชื่อผู้สมัครภาษาอังกฤษในชื่อไฟล์ DB</td></tr>
+  <tr><td><code>--days N</code></td><td>20</td><td>จำนวน data point รายวัน</td></tr>
+  <tr><td><code>--lookback-days N</code></td><td>45</td><td>จำนวนวันปฏิทินที่ขอจาก API (เพิ่มถ้าได้ไม่ครบ)</td></tr>
+  <tr><td><code>BOT_DB_PATH</code> / <code>--db-path</code></td><td><code>.venv/…</code></td><td>เปลี่ยนที่เก็บไฟล์ DB</td></tr>
+</table>
+
+<h2 id="schedule">8. รันอัตโนมัติ (ทางเลือก)</h2>
+<p>BOT เผยแพร่ข้อมูลทุกวันทำการเวลา 18:00 น. ตัวอย่าง cron (จันทร์–ศุกร์ 18:30 น. เวลาไทย):</p>
+<pre><code>30 18 * * 1-5  cd /path/to/bot-fx-workflow &amp;&amp; uv run bot-fx &gt;&gt; run.log 2&gt;&amp;1</code></pre>
+
+<h2 id="trouble">9. แก้ปัญหา</h2>
+<table>
+  <tr><th>อาการ</th><th>สาเหตุ / วิธีแก้</th></tr>
+  <tr><td><code>BOT_API_TOKEN is not set</code></td><td>ยังไม่ได้ตั้งค่าใน <code>.env</code> หรือ environment</td></tr>
+  <tr><td><code>HTTP 401 … Authorization field missing</code></td><td>token ว่าง/ผิด หรือยังไม่ได้ Subscribe ผลิตภัณฑ์ Exchange Rates</td></tr>
+  <tr><td><code>HTTP 429</code></td><td>เกินโควตา 200 calls/ชั่วโมง — โปรแกรมจะ retry เอง รอสักครู่แล้วรันใหม่</td></tr>
+  <tr><td><code>warning: only N of 20 data points</code></td><td>ช่วงวันหยุดยาว — เพิ่ม <code>--lookback-days 60</code></td></tr>
+  <tr><td>ไม่พบไฟล์ DB</td><td>ดูพาธจากบรรทัด <code>db:</code> ตอนรัน; ไฟล์ซ่อนอยู่ใน <code>.venv/</code></td></tr>
+</table>
+
+</div></body>
+</html>
