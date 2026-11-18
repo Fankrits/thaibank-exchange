@@ -65,7 +65,36 @@ Other ways to run it:
 Running it again is safe: new days are added, existing days are not duplicated, and a day is
 only updated if BOT revised its rate.
 
-## 5. Where is my data?
+## 5. How it works
+
+```mermaid
+flowchart TD
+    A["uv run bot-fx"] --> B["cli.py: load .env + settings<br/>(token, applicant name, DB path)"]
+    B --> C["workflow.py: today (Bangkok time)<br/>look back up to 45 days"]
+    C --> D["client.py: GET DAILY_REF_RATE<br/>one window of ≤ 31 days<br/>Authorization: token"]
+    D -->|"HTTP 401/403"| X["stop: print error, exit 1"]
+    D -->|"429 / 5xx / network"| R["retry with backoff (3 tries)"] --> D
+    D -->|"200 OK"| E["parse rows, skip empty rates"]
+    E --> F{"≥ 20 points yet?"}
+    F -->|"no, and still inside 45 days"| G["move to the previous 31-day window"] --> D
+    F -->|yes| H["dedupe by date, keep the latest 20"]
+    H --> I["db.py: SQLite upsert into daily_ref_rate<br/>new day → INSERT · changed rate → UPDATE · same → skip"]
+    I --> J["print summary: inserted / updated / unchanged"]
+    J -->|"--dashboard"| K["serve.py: local server on 127.0.0.1<br/>opens docs/dashboard.html with the DB loaded"]
+```
+
+| Step | Module | What happens |
+|---|---|---|
+| 1. Configure | `cli.py`, `config.py` | Reads `.env`; DB path is `.venv/bot_api_daily_<name>.db` |
+| 2. Choose dates | `workflow.py` | Ends at today (Bangkok time), looks back at most 45 days |
+| 3. Fetch | `client.py` | BOT rejects ranges over 31 days, so it requests ≤ 31-day windows, newest first, and stops once it has 20 points (usually one request). BOT only publishes on business days. |
+| 4. Select | `workflow.py` | Merges windows, drops duplicate dates, keeps the **latest 20** |
+| 5. Store | `db.py` | Appends new days; updates a day only if BOT revised the rate; never duplicates |
+| 6. View (optional) | `serve.py`, `docs/dashboard.html` | Serves the page and the DB file on localhost only; the browser reads the DB with sql.js |
+
+One run uses 1 API call in the normal case (the plan allows 200 calls/hour).
+
+## 6. Where is my data?
 
 The database is at `.venv/bot_api_daily_<Applicant_Name>.db`. `.venv` is a hidden folder.
 
