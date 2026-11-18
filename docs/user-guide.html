@@ -40,6 +40,15 @@
   .note{background:#fff8e1;border:1px solid #ecd68a;border-radius:8px;padding:10px 14px;margin:14px 0}
   .ok{background:#eaf5ee;border-color:#b6d9c4}
   ol li,ul li{margin:4px 0}
+  kbd{font:.85em ui-monospace,Menlo,monospace;background:var(--code);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px}
+  .fast{border:1px solid #b6d9c4;border-left:5px solid var(--accent);background:#f3faf6;border-radius:10px;padding:14px 18px 8px;margin:16px 0 24px}
+  .fast-tag{font-weight:700;color:var(--accent);margin-bottom:4px}
+  .fast pre{margin:8px 0}
+  .fast img{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:8px;margin:10px 0;box-shadow:0 2px 10px #0000001a}
+  .fast-list{columns:2;column-gap:28px;padding-left:20px;margin:6px 0}
+  .fast-more{color:var(--muted);font-size:.92rem}
+  h3{font-size:1.05rem;margin-top:1.8rem}
+  @media (max-width:860px){.fast-list{columns:1}}
 </style>
 </head>
 <body><div class="wrap">
@@ -110,6 +119,22 @@ APPLICANT_NAME=Kritsada_Nhanjeing</code></pre>
 <p><code>APPLICANT_NAME</code> คือชื่อผู้สมัครภาษาอังกฤษ ใช้ตั้งชื่อไฟล์ฐานข้อมูล (ช่องว่าง/อักขระพิเศษจะถูกแปลงเป็น <code>_</code>)</p>
 
 <h2 id="run">5. การรัน</h2>
+
+<div class="fast">
+  <div class="fast-tag">⚡ ทางลัด — ดูผลได้ทันที</div>
+  <pre><code>uv run bot-fx --dashboard</code></pre>
+  <p>คำสั่งเดียว: ดึงข้อมูลล่าสุด → บันทึกลง SQLite → <b>เปิดเบราว์เซอร์พร้อม Dashboard</b> ที่โหลดข้อมูลให้แล้ว (ไม่ต้องเลือกไฟล์) กด <kbd>Ctrl+C</kbd> ในเทอร์มินัลเมื่อต้องการปิด</p>
+  <img src="img/dashboard.png" alt="ตัวอย่างหน้า Dashboard: KPI, กราฟแนวโน้ม และกราฟการกระจายตัวของอัตราแลกเปลี่ยน" loading="lazy">
+  <ul class="fast-list">
+    <li><b>Overview</b> — KPI (ล่าสุด, เฉลี่ย, สูง/ต่ำ, volatility) และกราฟแนวโน้ม</li>
+    <li><b>Data table</b> — ค้นหา เรียง และส่งออก CSV</li>
+    <li><b>Data quality</b> — ตรวจความครบถ้วนของข้อมูล</li>
+    <li><b>SQL console</b> — query ฐานข้อมูลแบบอ่านอย่างเดียว</li>
+  </ul>
+  <p class="fast-more">ดูข้อมูลเดิมโดยไม่ดึงใหม่: <code>uv run bot-fx-dashboard</code> · รายละเอียดเพิ่มเติม: <a href="#dashboard">หัวข้อ 7</a></p>
+</div>
+
+<h3>รันเฉพาะดึงข้อมูล (ไม่เปิด Dashboard)</h3>
 <pre><code>uv run bot-fx</code></pre>
 <p>ตัวอย่างผลลัพธ์:</p>
 <pre><code>fetched 20 points (2026-10-22 .. 2026-11-18)
@@ -136,8 +161,13 @@ db: /path/to/project/.venv/bot_api_daily_Kritsada_Nhanjeing.db
 <div class="note">ไฟล์ DB อยู่ใน <code>.venv</code> ตามโจทย์ — การลบ/สร้าง <code>.venv</code> ใหม่ (เช่น <code>rm -rf .venv</code>) จะทำให้ข้อมูลหาย ควรสำรองไฟล์ก่อน</div>
 
 <h2 id="dashboard">7. ดูข้อมูลด้วย Dashboard</h2>
-<p>เปิดไฟล์ <code>docs/dashboard.html</code> ในเบราว์เซอร์ (Chrome/Edge แนะนำ) แล้วกด <b>Open .db</b> เลือกไฟล์ฐานข้อมูล — ประมวลผลในเครื่อง ไม่อัปโหลดไฟล์ไปไหน มี KPI, กราฟ, ตาราง (ค้นหา/เรียง/ส่งออก CSV), ตรวจคุณภาพข้อมูล และ SQL console แบบอ่านอย่างเดียว หลังรัน <code>uv run bot-fx</code> ใหม่ให้กด <b>Refresh</b></p>
-<p><b>เปิดอัตโนมัติ:</b> <code>uv run bot-fx-dashboard</code> (เปิดเบราว์เซอร์พร้อมโหลด DB ให้เลย) หรือ <code>uv run bot-fx --dashboard</code> (ดึงข้อมูลใหม่แล้วเปิด) — เซิร์ฟเวอร์รันบน 127.0.0.1 เท่านั้น กด Ctrl+C เพื่อหยุด</p>
+<table>
+  <tr><th>วิธี</th><th>คำสั่ง / ขั้นตอน</th></tr>
+  <tr><td><b>ดึงใหม่ + เปิดเลย</b></td><td><code>uv run bot-fx --dashboard</code></td></tr>
+  <tr><td><b>เปิดข้อมูลเดิม</b></td><td><code>uv run bot-fx-dashboard</code> (ตัวเลือก <code>--port</code>, <code>--no-open</code>)</td></tr>
+  <tr><td><b>เปิดไฟล์เอง</b></td><td>เปิด <code>docs/dashboard.html</code> ในเบราว์เซอร์ (แนะนำ Chrome/Edge) → กด <b>Open .db</b> → เลือกไฟล์ใน <code>.venv/</code> (โฟลเดอร์ซ่อน: กด <kbd>⌘ Shift .</kbd>)</td></tr>
+</table>
+<p>เซิร์ฟเวอร์ทำงานบน <code>127.0.0.1</code> เท่านั้น และเสิร์ฟแค่หน้า Dashboard กับไฟล์ DB (ไม่เปิดเผย <code>.env</code>) ข้อมูลประมวลผลในเบราว์เซอร์ ไม่ถูกอัปโหลด หลังรัน <code>uv run bot-fx</code> ใหม่ให้กดปุ่ม <b>Refresh</b> ในหน้า Dashboard</p>
 
 <h2 id="options">8. ตัวเลือก</h2>
 <table>
