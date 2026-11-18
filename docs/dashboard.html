@@ -1,0 +1,879 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>THB/USD Dashboard · BOT daily reference rate</title>
+
+<!--
+  Single-file dashboard for the SQLite DB written by `uv run bot-fx`.
+  - Reads the .db fully in the browser (sql.js / WebAssembly). Nothing is uploaded anywhere.
+  - UI = shadcn/ui design tokens (zinc theme) + shadcn component class recipes on Tailwind v4.
+    (shadcn is a React/Tailwind component kit; a single HTML file cannot run its CLI, so the
+    component markup/classes are reproduced 1:1 here.)
+  - Charts = Chart.js styled to match shadcn's chart look.
+-->
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+
+<style type="text/tailwindcss">
+  @custom-variant dark (&:is(.dark *));
+
+  @theme inline {
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
+    --color-card: var(--card);
+    --color-card-foreground: var(--card-foreground);
+    --color-popover: var(--popover);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-primary: var(--primary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-secondary: var(--secondary);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-muted: var(--muted);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-accent: var(--accent);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-destructive: var(--destructive);
+    --color-border: var(--border);
+    --color-input: var(--input);
+    --color-ring: var(--ring);
+    --color-up: var(--up);
+    --color-down: var(--down);
+    --color-warn: var(--warn);
+    --radius-sm: calc(var(--radius) - 4px);
+    --radius-md: calc(var(--radius) - 2px);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) + 4px);
+    --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  /* shadcn "zinc" theme */
+  :root {
+    --radius: 0.625rem;
+    --background: #ffffff;
+    --foreground: #09090b;
+    --card: #ffffff;
+    --card-foreground: #09090b;
+    --popover: #ffffff;
+    --popover-foreground: #09090b;
+    --primary: #18181b;
+    --primary-foreground: #fafafa;
+    --secondary: #f4f4f5;
+    --secondary-foreground: #18181b;
+    --muted: #f4f4f5;
+    --muted-foreground: #71717a;
+    --accent: #f4f4f5;
+    --accent-foreground: #18181b;
+    --destructive: #ef4444;
+    --border: #e4e4e7;
+    --input: #e4e4e7;
+    --ring: #a1a1aa;
+    --up: #16a34a;
+    --down: #dc2626;
+    --warn: #d97706;
+  }
+  .dark {
+    --background: #09090b;
+    --foreground: #fafafa;
+    --card: #0f0f12;
+    --card-foreground: #fafafa;
+    --popover: #0f0f12;
+    --popover-foreground: #fafafa;
+    --primary: #fafafa;
+    --primary-foreground: #18181b;
+    --secondary: #27272a;
+    --secondary-foreground: #fafafa;
+    --muted: #27272a;
+    --muted-foreground: #a1a1aa;
+    --accent: #27272a;
+    --accent-foreground: #fafafa;
+    --destructive: #f87171;
+    --border: #27272a;
+    --input: #3f3f46;
+    --ring: #52525b;
+    --up: #4ade80;
+    --down: #f87171;
+    --warn: #fbbf24;
+  }
+  @layer base {
+    * { @apply border-border outline-ring/50; }
+    body { @apply bg-background text-foreground font-sans antialiased; }
+  }
+  .num { font-variant-numeric: tabular-nums; }
+  .scroll-thin::-webkit-scrollbar { height: 8px; width: 8px; }
+  .scroll-thin::-webkit-scrollbar-thumb { background: var(--border); border-radius: 8px; }
+</style>
+</head>
+
+<body class="min-h-screen">
+
+<!-- ───────── Header ───────── -->
+<header class="sticky top-0 z-30 border-b bg-background/80 backdrop-blur">
+  <div class="mx-auto flex h-14 max-w-7xl items-center gap-3 px-4 sm:px-6">
+    <div class="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground" id="logo"></div>
+    <div class="min-w-0 leading-tight">
+      <h1 class="truncate text-sm font-semibold">THB / USD Dashboard</h1>
+      <p class="truncate text-xs text-muted-foreground">BOT weighted-average interbank rate · daily</p>
+    </div>
+    <div class="ml-auto flex items-center gap-2">
+      <span id="fileChip" class="hidden max-w-[16rem] items-center gap-1.5 truncate rounded-md border bg-muted/50 px-2.5 py-1 text-xs text-muted-foreground md:inline-flex"></span>
+      <button id="btnRefresh" class="hidden h-9 items-center justify-center gap-2 rounded-md border bg-background px-3 text-sm font-medium shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground sm:inline-flex" title="Re-read the file from disk"></button>
+      <button id="btnOpen" class="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground shadow-xs transition-colors hover:bg-primary/90"></button>
+      <button id="btnTheme" class="inline-flex size-9 items-center justify-center rounded-md border bg-background shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground" aria-label="Toggle theme"></button>
+    </div>
+  </div>
+</header>
+
+<input id="fileInput" type="file" accept=".db,.sqlite,.sqlite3,application/vnd.sqlite3,application/octet-stream" class="hidden">
+
+<main class="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6">
+
+  <!-- ───────── Empty / load state ───────── -->
+  <section id="empty" class="hidden">
+    <div id="dropzone" class="flex cursor-pointer flex-col items-center gap-4 rounded-xl border-2 border-dashed bg-card px-6 py-16 text-center transition-colors hover:bg-accent/40">
+      <div class="flex size-12 items-center justify-center rounded-full bg-muted text-muted-foreground" id="emptyIcon"></div>
+      <div class="space-y-1">
+        <h2 class="text-lg font-semibold">Open your SQLite database</h2>
+        <p class="text-sm text-muted-foreground">Drop the <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">.db</code> file here, or click to browse. It is read locally in your browser — nothing is uploaded.</p>
+      </div>
+      <div class="flex max-w-full items-center gap-2 rounded-md border bg-muted/50 py-1 pl-3 pr-1 text-left">
+        <code class="truncate font-mono text-xs text-muted-foreground" id="dbPathHint">~/dev/thaibank-exchange/.venv/bot_api_daily_Kritsada_Nhanjeing.db</code>
+        <button id="btnCopyPath" class="inline-flex h-7 items-center rounded-md border bg-background px-2 text-xs font-medium hover:bg-accent">Copy path</button>
+      </div>
+      <p class="text-xs text-muted-foreground">Tip: <code class="font-mono">.venv</code> is a hidden folder — press <kbd class="rounded border bg-muted px-1.5 py-0.5 font-mono text-[11px]">⌘ Shift .</kbd> in the file dialog, or paste the path with <kbd class="rounded border bg-muted px-1.5 py-0.5 font-mono text-[11px]">⌘ Shift G</kbd>.</p>
+    </div>
+    <div id="reconnect" class="mt-4 hidden items-center justify-between gap-3 rounded-lg border bg-card p-4 text-sm"></div>
+  </section>
+
+  <!-- ───────── Error alert ───────── -->
+  <div id="alert" class="hidden"></div>
+
+  <!-- ───────── Dashboard ───────── -->
+  <div id="app" class="hidden space-y-6">
+
+    <!-- Toolbar -->
+    <div class="flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <h2 class="text-2xl font-semibold tracking-tight">Exchange rate overview</h2>
+        <p id="subtitle" class="text-sm text-muted-foreground"></p>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="text-xs text-muted-foreground">Last</span>
+        <div id="rangeGroup" class="inline-flex rounded-md border bg-background p-0.5 shadow-xs" role="group"></div>
+        <span class="text-xs text-muted-foreground">points</span>
+      </div>
+    </div>
+
+    <!-- KPI cards -->
+    <section id="kpis" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"></section>
+
+    <!-- Tabs -->
+    <div>
+      <div id="tabList" class="inline-flex h-9 w-fit items-center justify-center rounded-lg bg-muted p-[3px] text-muted-foreground" role="tablist"></div>
+
+      <!-- Overview -->
+      <div id="tab-overview" class="mt-4 space-y-4">
+        <div class="grid gap-4 lg:grid-cols-3">
+          <div class="rounded-xl border bg-card text-card-foreground shadow-sm lg:col-span-2">
+            <div class="flex flex-wrap items-start justify-between gap-2 px-6 pt-6">
+              <div class="space-y-1.5">
+                <h3 class="font-semibold leading-none">Rate trend</h3>
+                <p class="text-sm text-muted-foreground" id="trendDesc">THB per 1 USD</p>
+              </div>
+              <div class="flex items-center gap-4 text-sm">
+                <label class="flex cursor-pointer items-center gap-2"><input id="chkMA" type="checkbox" checked class="size-4 rounded border accent-[var(--primary)]"> <span class="text-muted-foreground">5-pt moving avg</span></label>
+                <label class="flex cursor-pointer items-center gap-2"><input id="chkAvg" type="checkbox" checked class="size-4 rounded border accent-[var(--primary)]"> <span class="text-muted-foreground">Average</span></label>
+              </div>
+            </div>
+            <div class="px-6 pb-6 pt-4"><div class="h-[320px]"><canvas id="chTrend"></canvas></div></div>
+          </div>
+
+          <div class="rounded-xl border bg-card text-card-foreground shadow-sm">
+            <div class="space-y-1.5 px-6 pt-6">
+              <h3 class="font-semibold leading-none">Rate distribution</h3>
+              <p class="text-sm text-muted-foreground">How many days fell in each rate band</p>
+            </div>
+            <div class="px-6 pb-6 pt-4"><div class="h-[320px]"><canvas id="chHist"></canvas></div></div>
+          </div>
+        </div>
+
+        <div class="grid gap-4 lg:grid-cols-3">
+          <div class="rounded-xl border bg-card text-card-foreground shadow-sm lg:col-span-2">
+            <div class="flex flex-wrap items-start justify-between gap-2 px-6 pt-6">
+              <div class="space-y-1.5">
+                <h3 class="font-semibold leading-none">Daily change</h3>
+                <p class="text-sm text-muted-foreground">Day-over-day move in THB. Up = baht weaker / USD stronger.</p>
+              </div>
+              <div class="flex items-center gap-3 text-xs text-muted-foreground">
+                <span class="inline-flex items-center gap-1.5"><span class="size-2.5 rounded-sm bg-up"></span>Up</span>
+                <span class="inline-flex items-center gap-1.5"><span class="size-2.5 rounded-sm bg-down"></span>Down</span>
+              </div>
+            </div>
+            <div class="px-6 pb-6 pt-4"><div class="h-[260px]"><canvas id="chChange"></canvas></div></div>
+          </div>
+
+          <div class="rounded-xl border bg-card text-card-foreground shadow-sm">
+            <div class="space-y-1.5 px-6 pt-6">
+              <h3 class="font-semibold leading-none">Weekday pattern</h3>
+              <p class="text-sm text-muted-foreground">Average day-over-day change by weekday</p>
+            </div>
+            <div class="px-6 pb-6 pt-4"><div class="h-[260px]"><canvas id="chDow"></canvas></div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Table -->
+      <div id="tab-table" class="mt-4 hidden">
+        <div class="rounded-xl border bg-card text-card-foreground shadow-sm">
+          <div class="flex flex-wrap items-center justify-between gap-3 px-6 pt-6">
+            <div class="space-y-1.5">
+              <h3 class="font-semibold leading-none">Daily rates</h3>
+              <p class="text-sm text-muted-foreground" id="tableDesc"></p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <div class="relative">
+                <span class="pointer-events-none absolute left-2.5 top-2.5 text-muted-foreground" id="searchIcon"></span>
+                <input id="q" type="search" placeholder="Filter date, weekday, rate…" class="h-9 w-56 rounded-md border bg-transparent py-1 pl-8 pr-3 text-sm shadow-xs outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30">
+              </div>
+              <button id="btnCsv" class="inline-flex h-9 items-center justify-center gap-2 rounded-md border bg-background px-3 text-sm font-medium shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground"></button>
+            </div>
+          </div>
+          <div class="px-6 pb-6 pt-4">
+            <div class="scroll-thin overflow-x-auto rounded-md border">
+              <table class="w-full caption-bottom text-sm" id="tbl"></table>
+            </div>
+            <div class="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm">
+              <div class="text-muted-foreground" id="pageInfo"></div>
+              <div class="flex items-center gap-4">
+                <label class="flex items-center gap-2 text-muted-foreground">Rows
+                  <select id="pageSize" class="h-8 rounded-md border bg-transparent px-2 text-sm text-foreground shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30">
+                    <option class="bg-popover">10</option><option class="bg-popover">20</option><option class="bg-popover">50</option><option class="bg-popover">100</option>
+                  </select>
+                </label>
+                <div class="flex items-center gap-1" id="pager"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Data quality -->
+      <div id="tab-quality" class="mt-4 hidden">
+        <div class="grid gap-4 lg:grid-cols-3">
+          <div class="rounded-xl border bg-card text-card-foreground shadow-sm lg:col-span-2">
+            <div class="space-y-1.5 px-6 pt-6">
+              <h3 class="font-semibold leading-none">Data quality checks</h3>
+              <p class="text-sm text-muted-foreground" id="qualitySummary"></p>
+            </div>
+            <div class="px-6 pb-6 pt-4"><ul id="checks" class="divide-y rounded-md border"></ul></div>
+          </div>
+          <div class="space-y-4">
+            <div class="rounded-xl border bg-card text-card-foreground shadow-sm">
+              <div class="space-y-1.5 px-6 pt-6">
+                <h3 class="font-semibold leading-none">Database</h3>
+                <p class="text-sm text-muted-foreground">File and schema</p>
+              </div>
+              <div class="space-y-3 px-6 pb-6 pt-4 text-sm" id="dbInfo"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SQL -->
+      <div id="tab-sql" class="mt-4 hidden">
+        <div class="rounded-xl border bg-card text-card-foreground shadow-sm">
+          <div class="space-y-1.5 px-6 pt-6">
+            <h3 class="font-semibold leading-none">SQL console</h3>
+            <p class="text-sm text-muted-foreground">Read-only queries (SELECT / WITH / PRAGMA / EXPLAIN) against the loaded file. <kbd class="rounded border bg-muted px-1.5 py-0.5 font-mono text-[11px]">⌘ Enter</kbd> to run.</p>
+          </div>
+          <div class="space-y-3 px-6 pb-6 pt-4">
+            <div id="sqlChips" class="flex flex-wrap gap-2"></div>
+            <textarea id="sql" spellcheck="false" rows="5" class="w-full rounded-md border bg-transparent px-3 py-2 font-mono text-sm shadow-xs outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30"></textarea>
+            <div class="flex items-center gap-3">
+              <button id="btnRun" class="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow-xs transition-colors hover:bg-primary/90"></button>
+              <span id="sqlMeta" class="text-sm text-muted-foreground"></span>
+            </div>
+            <div id="sqlOut"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <footer class="pb-4 pt-2 text-center text-xs text-muted-foreground">
+      Source: Bank of Thailand API · Weighted-average Interbank Exchange Rate – THB / USD · rendered locally with sql.js
+    </footer>
+  </div>
+</main>
+
+<!-- drag overlay + toast -->
+<div id="dropOverlay" class="pointer-events-none fixed inset-0 z-50 hidden items-center justify-center bg-background/80 backdrop-blur-sm">
+  <div class="rounded-xl border-2 border-dashed bg-card px-10 py-8 text-lg font-medium shadow-lg">Drop the .db file to load it</div>
+</div>
+<div id="toast" class="pointer-events-none fixed bottom-6 left-1/2 z-50 hidden -translate-x-1/2 rounded-md border bg-popover px-4 py-2 text-sm text-popover-foreground shadow-lg"></div>
+
+<script>
+/* ═════════════════════════ helpers ═════════════════════════ */
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const SQLJS_BASE = 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3';
+const DEFAULT_DB_URLS = ['../.venv/bot_api_daily_Kritsada_Nhanjeing.db', '.venv/bot_api_daily_Kritsada_Nhanjeing.db'];
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const pd = p => new Date(p + 'T00:00:00Z');
+const fmtDate = p => { const d = pd(p); return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`; };
+const fmtShort = p => { const d = pd(p); return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`; };
+const dowOf = p => DOW[pd(p).getUTCDay()];
+const f4 = n => n == null ? '—' : n.toFixed(4);
+const sgn = (n, d = 4) => n == null ? '—' : (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n).toFixed(d);
+const fmtTs = iso => { if (!iso) return '—'; const d = new Date(iso); if (isNaN(d)) return iso; return new Date(d.getTime() + 7 * 36e5).toISOString().slice(0, 16).replace('T', ' '); };
+const fmtBytes = b => b < 1024 ? b + ' B' : b < 1048576 ? (b / 1024).toFixed(1) + ' KB' : (b / 1048576).toFixed(1) + ' MB';
+const bkkToday = () => new Date(Date.now() + 7 * 36e5).toISOString().slice(0, 10);
+const daysBetween = (a, b) => Math.round((pd(b) - pd(a)) / 864e5);
+const hexA = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
+const isDark = () => document.documentElement.classList.contains('dark');
+
+const ICONS = {
+  logo: '<path d="m3 17 6-6 4 4 8-8"/><path d="M17 7h4v4"/>',
+  upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/>',
+  refresh: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2m-7.07-2.93 1.41-1.41m11.32-11.32 1.41-1.41M2 12h2m16 0h2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41"/>',
+  moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
+  up: '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
+  down: '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>',
+  trendUp: '<path d="m22 7-8.5 8.5-5-5L2 17"/><path d="M16 7h6v6"/>',
+  db: '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/>',
+  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>',
+  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  check: '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
+  warn: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+  x: '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>',
+  play: '<polygon points="6 3 20 12 6 21 6 3"/>',
+  chevL: '<path d="m15 18-6-6 6-6"/>',
+  chevR: '<path d="m9 18 6-6-6-6"/>',
+  sort: '<path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/>',
+  sortUp: '<path d="m18 15-6-6-6 6"/>',
+  sortDown: '<path d="m6 9 6 6 6-6"/>',
+};
+const icon = (n, c = 'size-4') => `<svg class="${c} shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n]}</svg>`;
+
+function toast(msg) {
+  const t = $('#toast'); t.textContent = msg; t.classList.remove('hidden');
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.add('hidden'), 2600);
+}
+
+/* shadcn-ish tiny component builders */
+const badge = (text, kind = 'secondary') => {
+  const k = {
+    secondary: 'border-transparent bg-secondary text-secondary-foreground',
+    outline: 'text-foreground',
+    up: 'border-transparent bg-up/15 text-up',
+    down: 'border-transparent bg-down/15 text-down',
+    warn: 'border-transparent bg-warn/15 text-warn',
+    muted: 'border-transparent bg-muted text-muted-foreground',
+  }[kind];
+  return `<span class="num inline-flex items-center gap-1 whitespace-nowrap rounded-md border px-2 py-0.5 text-xs font-medium ${k}">${text}</span>`;
+};
+
+/* ═════════════════════════ state ═════════════════════════ */
+const state = {
+  SQL: null, db: null, name: '', size: 0, handle: null, url: null, cached: false,
+  all: [],            // every row in daily_ref_rate (ascending), enriched
+  hasTable: false,
+  range: 20, tab: 'overview', ma: true, avg: true,
+  sort: { key: 'period', dir: 'desc' }, page: 1, pageSize: 10, q: '',
+  charts: {},
+};
+const RANGES = [5, 10, 20, 'All'];
+const TABS = [['overview', 'Overview'], ['table', 'Data table'], ['quality', 'Data quality'], ['sql', 'SQL console']];
+
+/* ═════════════════════════ IndexedDB (remember last file) ═════════════════════════ */
+const idb = {
+  open: () => new Promise((res, rej) => { const r = indexedDB.open('bot-fx-dashboard', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }),
+  async get(k) { try { const db = await this.open(); return await new Promise(res => { const r = db.transaction('kv').objectStore('kv').get(k); r.onsuccess = () => res(r.result); r.onerror = () => res(undefined); }); } catch { return undefined; } },
+  async set(k, v) { try { const db = await this.open(); await new Promise(res => { const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').put(v, k); tx.oncomplete = res; tx.onerror = res; }); } catch { /* storage unavailable */ } },
+};
+
+/* ═════════════════════════ loading the database ═════════════════════════ */
+async function getSQL() {
+  if (!state.SQL) state.SQL = await initSqlJs({ locateFile: f => `${SQLJS_BASE}/${f}` });
+  return state.SQL;
+}
+
+function showAlert(title, body) {
+  const a = $('#alert');
+  a.className = 'relative w-full rounded-lg border border-destructive/50 bg-card px-4 py-3 text-sm';
+  a.innerHTML = `<div class="flex gap-3"><span class="mt-0.5 text-destructive">${icon('warn')}</span><div><div class="font-medium text-destructive">${esc(title)}</div><div class="mt-1 text-muted-foreground">${body}</div></div></div>`;
+}
+const hideAlert = () => { $('#alert').className = 'hidden'; };
+
+async function loadBytes(bytes, meta = {}) {
+  const SQL = await getSQL();
+  let db;
+  try {
+    db = new SQL.Database(bytes);
+    db.exec('SELECT name FROM sqlite_master LIMIT 1');   // throws if not a SQLite file
+  } catch (e) {
+    showAlert('Not a readable SQLite database', esc(e.message || e));
+    return false;
+  }
+  if (state.db) state.db.close();
+  Object.assign(state, { db, name: meta.name || 'database.db', size: bytes.byteLength, handle: meta.handle || null, url: meta.url || null, cached: !!meta.cached });
+  hideAlert();
+  readRows();
+  $('#empty').classList.add('hidden');
+  $('#app').classList.remove('hidden');
+  state.page = 1;
+  renderAll();
+  if (!meta.cached) idb.set('bytes', { name: state.name, bytes, savedAt: Date.now() });
+  return true;
+}
+
+function readRows() {
+  const tables = state.db.exec("SELECT name FROM sqlite_master WHERE type='table'")[0]?.values.flat() || [];
+  state.tables = tables;
+  state.hasTable = tables.includes('daily_ref_rate');
+  state.all = [];
+  if (!state.hasTable) return;
+  const res = state.db.exec('SELECT period, rate, currency_pair, source_api, fetched_at FROM daily_ref_rate ORDER BY period ASC')[0];
+  const rows = (res?.values || []).map(([period, rate, pair, api, fetched]) => ({ period, rate: Number(rate), pair, api, fetched }));
+  rows.forEach((r, i) => {
+    const p = rows[i - 1];
+    r.chg = p ? r.rate - p.rate : null;
+    r.pct = p && p.rate ? (r.rate - p.rate) / p.rate * 100 : null;
+    r.dow = dowOf(r.period);
+  });
+  state.all = rows;
+}
+
+async function loadFromHandle(handle, { interactive = false } = {}) {
+  let perm = await handle.queryPermission?.({ mode: 'read' });
+  if (perm !== 'granted' && interactive) perm = await handle.requestPermission?.({ mode: 'read' });
+  if (perm !== 'granted') return false;
+  const file = await handle.getFile();
+  const ok = await loadBytes(new Uint8Array(await file.arrayBuffer()), { name: file.name, handle });
+  if (ok) idb.set('handle', handle);
+  return ok;
+}
+
+async function openFile() {
+  if (window.showOpenFilePicker) {
+    try {
+      const [h] = await showOpenFilePicker({ types: [{ description: 'SQLite database', accept: { 'application/octet-stream': ['.db', '.sqlite', '.sqlite3'] } }] });
+      await loadFromHandle(h, { interactive: true });
+    } catch (e) { if (e.name !== 'AbortError') $('#fileInput').click(); }
+  } else $('#fileInput').click();
+}
+
+async function loadFile(file, handle) {
+  await loadBytes(new Uint8Array(await file.arrayBuffer()), { name: file.name, handle });
+  if (handle) idb.set('handle', handle);
+}
+
+async function refreshFile() {
+  try {
+    if (state.handle) { if (await loadFromHandle(state.handle, { interactive: true })) toast('Reloaded from disk'); else toast('Permission needed — reopen the file'); }
+    else if (state.url) { const r = await fetch(state.url + '?t=' + Date.now()); await loadBytes(new Uint8Array(await r.arrayBuffer()), { name: state.name, url: state.url }); toast('Reloaded'); }
+    else toast('This copy came from a dropped file — reopen it to refresh');
+  } catch (e) { showAlert('Could not reload', esc(e.message || e)); }
+}
+
+async function boot() {
+  const qdb = new URLSearchParams(location.search).get('db');
+  const urls = qdb ? [qdb] : (location.protocol.startsWith('http') ? DEFAULT_DB_URLS : []);
+  for (const u of urls) {
+    try {
+      const r = await fetch(u);
+      if (r.ok && (await r.clone().arrayBuffer()).byteLength > 100) { await loadBytes(new Uint8Array(await r.arrayBuffer()), { name: u.split('/').pop(), url: u }); return; }
+    } catch { /* try next */ }
+  }
+  const handle = await idb.get('handle');
+  if (handle) { try { if (await loadFromHandle(handle)) return; } catch { /* fall through */ } }
+  const cache = await idb.get('bytes');
+  if (cache) {
+    await loadBytes(cache.bytes, { name: cache.name, cached: true });
+    state.cachedAt = cache.savedAt; renderHeader();
+    if (handle) { toast('Showing a saved copy — click Refresh to re-read the file'); }
+    return;
+  }
+  $('#empty').classList.remove('hidden');
+}
+
+/* ═════════════════════════ analytics ═════════════════════════ */
+const view = () => state.range === 'All' ? state.all : state.all.slice(-state.range);
+
+function stats(v) {
+  if (!v.length) return null;
+  const r = v.map(x => x.rate), n = r.length;
+  const sum = r.reduce((a, b) => a + b, 0), avg = sum / n;
+  let hi = 0, lo = 0; r.forEach((x, i) => { if (x > r[hi]) hi = i; if (x < r[lo]) lo = i; });
+  const s = [...r].sort((a, b) => a - b), median = n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2;
+  const pcts = v.map(x => x.pct).filter(x => x != null);
+  const pm = pcts.reduce((a, b) => a + b, 0) / (pcts.length || 1);
+  const sd = pcts.length > 1 ? Math.sqrt(pcts.reduce((a, b) => a + (b - pm) ** 2, 0) / (pcts.length - 1)) : null;
+  const first = v[0], last = v[n - 1];
+  return { n, avg, median, hi: v[hi], lo: v[lo], first, last, sd, range: r[hi] - r[lo],
+    change: last.rate - first.rate, changePct: (last.rate - first.rate) / first.rate * 100,
+    ups: v.filter(x => x.chg > 0).length, downs: v.filter(x => x.chg < 0).length };
+}
+
+/* ═════════════════════════ rendering ═════════════════════════ */
+function renderHeader() {
+  $('#logo').innerHTML = icon('logo', 'size-4');
+  $('#btnOpen').innerHTML = `${icon('upload')}<span class="hidden sm:inline">Open .db</span>`;
+  $('#btnRefresh').innerHTML = `${icon('refresh')}Refresh`;
+  $('#btnTheme').innerHTML = icon(isDark() ? 'sun' : 'moon');
+  const chip = $('#fileChip');
+  if (state.db) {
+    chip.className = 'inline-flex max-w-[16rem] items-center gap-1.5 truncate rounded-md border bg-muted/50 px-2.5 py-1 text-xs text-muted-foreground';
+    chip.innerHTML = `${icon('db', 'size-3.5')}<span class="truncate">${esc(state.name)}</span><span class="opacity-60">·</span><span>${fmtBytes(state.size)}</span>`;
+    chip.title = state.cached ? 'Saved copy (re-open or Refresh to re-read)' : state.name;
+    $('#btnRefresh').classList.remove('hidden'); $('#btnRefresh').classList.add('inline-flex');
+  }
+}
+
+function renderAll() {
+  renderHeader();
+  renderRange();
+  renderTabs();
+  $('#subtitle').textContent = state.hasTable && state.all.length
+    ? `${state.all[0].period} → ${state.all[state.all.length - 1].period} · ${state.all.length} rows in ${state.name}${state.cached ? ' (saved copy)' : ''}`
+    : state.name;
+  if (!state.hasTable) {
+    showAlert('Table `daily_ref_rate` not found', `This file has: ${state.tables.map(t => `<code class="rounded bg-muted px-1 font-mono text-xs">${esc(t)}</code>`).join(', ') || '<em>no tables</em>'}. Use the SQL console to explore it, or open the file created by <code class="font-mono text-xs">uv run bot-fx</code>.`);
+    $('#kpis').innerHTML = '';
+    setTab('sql');
+  } else hideAlert();
+  renderKpis(); renderCharts(); renderTable(); renderQuality(); initSql();
+}
+
+function renderRange() {
+  const g = $('#rangeGroup');
+  g.innerHTML = RANGES.map(r => {
+    const on = String(r) === String(state.range);
+    return `<button data-r="${r}" class="num h-8 min-w-9 rounded-[5px] px-3 text-sm font-medium transition-colors ${on ? 'bg-accent text-accent-foreground shadow-xs' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}">${r}</button>`;
+  }).join('');
+  g.querySelectorAll('button').forEach(b => b.onclick = () => { state.range = b.dataset.r === 'All' ? 'All' : +b.dataset.r; state.page = 1; renderRange(); renderKpis(); renderCharts(); renderTable(); });
+}
+
+function renderTabs() {
+  const l = $('#tabList');
+  l.innerHTML = TABS.map(([id, label]) => {
+    const on = id === state.tab;
+    return `<button role="tab" data-t="${id}" class="inline-flex h-[calc(100%-1px)] items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-transparent px-3 py-1 text-sm font-medium transition-[color,box-shadow] ${on ? 'bg-background text-foreground shadow-sm dark:border-input dark:bg-input/30' : 'text-foreground/70 hover:text-foreground dark:text-muted-foreground'}">${label}</button>`;
+  }).join('');
+  l.querySelectorAll('button').forEach(b => b.onclick = () => setTab(b.dataset.t));
+  TABS.forEach(([id]) => $('#tab-' + id).classList.toggle('hidden', id !== state.tab));
+}
+function setTab(t) { state.tab = t; renderTabs(); if (t === 'overview') requestAnimationFrame(renderCharts); }
+
+/* ── KPI cards ── */
+function kpi({ title, value, sub, right, icon: ic }) {
+  return `<div class="flex flex-col gap-2 rounded-xl border bg-card px-6 py-5 text-card-foreground shadow-sm">
+    <div class="flex items-center justify-between text-sm text-muted-foreground"><span>${title}</span>${ic ? `<span class="opacity-70">${icon(ic)}</span>` : ''}</div>
+    <div class="flex items-baseline justify-between gap-2"><div class="num text-2xl font-semibold tracking-tight">${value}</div>${right || ''}</div>
+    <div class="text-xs text-muted-foreground">${sub}</div>
+  </div>`;
+}
+function deltaBadge(chg, pct) {
+  if (chg == null) return badge('—', 'muted');
+  const k = chg > 0 ? 'up' : chg < 0 ? 'down' : 'muted';
+  return badge(`${chg > 0 ? icon('up', 'size-3') : chg < 0 ? icon('down', 'size-3') : ''}${sgn(pct, 2)}%`, k);
+}
+function renderKpis() {
+  const el = $('#kpis'), v = view(), s = stats(v);
+  if (!s) { el.innerHTML = ''; return; }
+  const l = s.last, pos = s.range ? (l.rate - s.lo.rate) / s.range * 100 : 50;
+  el.innerHTML = [
+    kpi({ title: 'Latest rate', value: f4(l.rate), right: deltaBadge(l.chg, l.pct), sub: `${dowOf(l.period)} ${fmtDate(l.period)} · ${sgn(l.chg)} vs prev day`, icon: 'trendUp' }),
+    kpi({ title: `Change over ${s.n} pts`, value: sgn(s.change), right: deltaBadge(s.change, s.changePct), sub: `${f4(s.first.rate)} (${fmtShort(s.first.period)}) → ${f4(l.rate)} (${fmtShort(l.period)})` }),
+    kpi({ title: 'Average', value: f4(s.avg), sub: `Median ${f4(s.median)} · ${s.ups} up / ${s.downs} down days` }),
+    kpi({ title: 'Volatility (σ of daily %)', value: s.sd == null ? '—' : s.sd.toFixed(3) + '%', sub: s.sd == null ? 'Need ≥ 3 points' : `Typical daily swing ≈ ${(s.avg * s.sd / 100).toFixed(3)} THB` }),
+    kpi({ title: 'Highest', value: f4(s.hi.rate), right: badge(fmtShort(s.hi.period), 'outline'), sub: `${dowOf(s.hi.period)} ${fmtDate(s.hi.period)}` }),
+    kpi({ title: 'Lowest', value: f4(s.lo.rate), right: badge(fmtShort(s.lo.period), 'outline'), sub: `${dowOf(s.lo.period)} ${fmtDate(s.lo.period)}` }),
+    `<div class="flex flex-col gap-2 rounded-xl border bg-card px-6 py-5 text-card-foreground shadow-sm">
+       <div class="flex items-center justify-between text-sm text-muted-foreground"><span>Range &amp; position</span></div>
+       <div class="num text-2xl font-semibold tracking-tight">${f4(s.range)}</div>
+       <div class="relative h-2 w-full rounded-full bg-muted"><div class="absolute inset-y-0 left-0 rounded-full bg-primary/30" style="width:${pos}%"></div><div class="absolute top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-background bg-primary shadow" style="left:${pos}%"></div></div>
+       <div class="text-xs text-muted-foreground">Latest sits at ${pos.toFixed(0)}% between low and high</div>
+     </div>`,
+    kpi({ title: 'Data points', value: String(s.n), right: badge(`${state.all.length} in DB`, 'muted'), sub: `Last fetched ${fmtTs(state.all.reduce((m, r) => r.fetched > m ? r.fetched : m, ''))} (BKK)`, icon: 'db' }),
+  ].join('');
+}
+
+/* ── Charts ── */
+function themeColors() {
+  return isDark()
+    ? { fg: '#fafafa', muted: '#a1a1aa', grid: 'rgba(255,255,255,.07)', card: '#18181b', border: '#3f3f46', c1: '#60a5fa', up: '#4ade80', down: '#f87171', ma: '#fbbf24', avg: '#a1a1aa', c2: '#a78bfa' }
+    : { fg: '#09090b', muted: '#71717a', grid: 'rgba(0,0,0,.06)', card: '#ffffff', border: '#e4e4e7', c1: '#2563eb', up: '#16a34a', down: '#dc2626', ma: '#d97706', avg: '#71717a', c2: '#7c3aed' };
+}
+function baseOpts(T) {
+  return {
+    responsive: true, maintainAspectRatio: false, animation: { duration: 350 },
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { display: false },
+      tooltip: { backgroundColor: T.card, borderColor: T.border, borderWidth: 1, titleColor: T.fg, bodyColor: T.fg, padding: 10, cornerRadius: 8, boxPadding: 4, usePointStyle: true, titleFont: { weight: '600' } },
+    },
+    scales: {
+      x: { grid: { display: false }, border: { color: T.border }, ticks: { color: T.muted, maxRotation: 0, autoSkipPadding: 14 } },
+      y: { grid: { color: T.grid }, border: { display: false }, ticks: { color: T.muted } },
+    },
+  };
+}
+const kill = k => { if (state.charts[k]) { state.charts[k].destroy(); delete state.charts[k]; } };
+
+function renderCharts() {
+  Object.keys(state.charts).forEach(kill);
+  const v = view(); if (!v.length || typeof Chart === 'undefined') return;
+  if ($('#tab-overview').classList.contains('hidden')) return;
+  const T = themeColors(), s = stats(v);
+  Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+  Chart.defaults.font.size = 12;
+  const labels = v.map(r => fmtShort(r.period));
+  const full = i => `${dowOf(v[i].period)} ${fmtDate(v[i].period)}`;
+  $('#trendDesc').textContent = `THB per 1 USD · ${fmtDate(v[0].period)} – ${fmtDate(v[v.length - 1].period)}`;
+
+  /* trend */
+  const ma = v.map((_, i) => i < 4 ? null : v.slice(i - 4, i + 1).reduce((a, b) => a + b.rate, 0) / 5);
+  const o1 = baseOpts(T);
+  o1.scales.y.grace = '12%'; o1.scales.y.ticks.callback = x => x.toFixed(2);
+  o1.plugins.tooltip.callbacks = {
+    title: it => full(it[0].dataIndex),
+    label: c => ` ${c.dataset.label}: ${c.parsed.y == null ? '—' : c.parsed.y.toFixed(4)}`,
+  };
+  state.charts.trend = new Chart($('#chTrend'), {
+    type: 'line',
+    data: { labels, datasets: [
+      { label: 'Rate', data: v.map(r => r.rate), borderColor: T.c1, borderWidth: 2, tension: 0.3, fill: true, pointRadius: v.length > 45 ? 0 : 3, pointHoverRadius: 5, pointBackgroundColor: T.c1,
+        backgroundColor: c => { const { chart } = c, a = chart.chartArea; if (!a) return null; const g = chart.ctx.createLinearGradient(0, a.top, 0, a.bottom); g.addColorStop(0, hexA(T.c1, .30)); g.addColorStop(1, hexA(T.c1, 0)); return g; } },
+      { label: '5-pt MA', data: ma, borderColor: T.ma, borderWidth: 2, borderDash: [6, 4], pointRadius: 0, tension: 0.3, hidden: !state.ma, spanGaps: false },
+      { label: 'Average', data: v.map(() => s.avg), borderColor: T.avg, borderWidth: 1, borderDash: [2, 4], pointRadius: 0, hidden: !state.avg },
+    ] },
+    options: o1,
+  });
+
+  /* histogram */
+  const k = Math.min(10, Math.max(4, Math.ceil(Math.sqrt(v.length))));
+  const lo = s.lo.rate, hi = s.hi.rate === lo ? lo + 0.01 : s.hi.rate, w = (hi - lo) / k;
+  const bins = Array(k).fill(0);
+  v.forEach(r => { bins[Math.min(k - 1, Math.floor((r.rate - lo) / w))]++; });
+  const o2 = baseOpts(T);
+  o2.interaction = { mode: 'index', intersect: false };
+  o2.scales.y.ticks.precision = 0; o2.scales.y.ticks.stepSize = 1; o2.scales.x.ticks.maxRotation = 45; o2.scales.x.ticks.autoSkip = false; o2.scales.x.ticks.font = { size: 10 };
+  o2.plugins.tooltip.callbacks = { title: it => `${it[0].label} THB`, label: c => ` ${c.parsed.y} day${c.parsed.y === 1 ? '' : 's'}` };
+  state.charts.hist = new Chart($('#chHist'), {
+    type: 'bar',
+    data: { labels: bins.map((_, i) => `${(lo + i * w).toFixed(2)}–${(lo + (i + 1) * w).toFixed(2)}`), datasets: [{ data: bins, backgroundColor: hexA(T.c2, .85), hoverBackgroundColor: T.c2, borderRadius: 4, borderSkipped: false }] },
+    options: o2,
+  });
+
+  /* daily change */
+  const o3 = baseOpts(T);
+  o3.scales.y.ticks.callback = x => (x > 0 ? '+' : '') + x.toFixed(2);
+  o3.plugins.tooltip.callbacks = {
+    title: it => full(it[0].dataIndex),
+    label: c => { const r = v[c.dataIndex]; return r.chg == null ? ' n/a (first point)' : ` ${sgn(r.chg)} THB (${sgn(r.pct, 2)}%)`; },
+  };
+  state.charts.change = new Chart($('#chChange'), {
+    type: 'bar',
+    data: { labels, datasets: [{ data: v.map(r => r.chg), backgroundColor: v.map(r => r.chg >= 0 ? T.up : T.down), borderRadius: 3, borderSkipped: false, maxBarThickness: 28 }] },
+    options: o3,
+  });
+
+  /* weekday pattern */
+  const order = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+  const dm = order.map(d => { const x = v.filter(r => r.dow === d && r.chg != null).map(r => r.chg); return x.length ? x.reduce((a, b) => a + b, 0) / x.length : 0; });
+  const dn = order.map(d => v.filter(r => r.dow === d && r.chg != null).length);
+  const o4 = baseOpts(T);
+  o4.indexAxis = 'y';
+  o4.scales.x.grid = { color: T.grid }; o4.scales.x.border = { display: false };
+  o4.scales.x.ticks.callback = x => (x > 0 ? '+' : '') + x.toFixed(2);
+  o4.scales.y.grid = { display: false }; o4.scales.y.border = { color: T.border };
+  o4.plugins.tooltip.callbacks = { label: c => ` avg ${sgn(c.parsed.x)} THB (${dn[c.dataIndex]} day${dn[c.dataIndex] === 1 ? '' : 's'})` };
+  state.charts.dow = new Chart($('#chDow'), {
+    type: 'bar',
+    data: { labels: order, datasets: [{ data: dm, backgroundColor: dm.map(x => x >= 0 ? T.up : T.down), borderRadius: 4, borderSkipped: false, maxBarThickness: 26 }] },
+    options: o4,
+  });
+}
+
+/* ── Data table ── */
+const COLS = [
+  ['period', 'Date', 'left'], ['dow', 'Day', 'left'], ['rate', 'Rate (THB/USD)', 'right'],
+  ['chg', 'Δ THB', 'right'], ['pct', 'Δ %', 'right'], ['fetched', 'Fetched (BKK)', 'right'],
+];
+function filtered() {
+  const v = view(), q = state.q.trim().toLowerCase();
+  let rows = q ? v.filter(r => [r.period, fmtDate(r.period), r.dow, r.rate.toFixed(4), r.fetched].join(' ').toLowerCase().includes(q)) : [...v];
+  const { key, dir } = state.sort, m = dir === 'asc' ? 1 : -1;
+  rows.sort((a, b) => { const x = a[key], y = b[key]; if (x == null) return 1; if (y == null) return -1; return (x < y ? -1 : x > y ? 1 : 0) * m; });
+  return rows;
+}
+function renderTable() {
+  if (!state.hasTable) return;
+  const rows = filtered(), v = view(), s = stats(v);
+  const pages = Math.max(1, Math.ceil(rows.length / state.pageSize));
+  state.page = Math.min(state.page, pages);
+  const start = (state.page - 1) * state.pageSize, slice = rows.slice(start, start + state.pageSize);
+  $('#tableDesc').textContent = `${rows.length} of ${state.all.length} rows · click a header to sort`;
+  const head = COLS.map(([k, label, al]) => {
+    const on = state.sort.key === k;
+    return `<th class="h-10 whitespace-nowrap px-3 align-middle font-medium text-muted-foreground ${al === 'right' ? 'text-right' : 'text-left'}">
+      <button data-k="${k}" class="inline-flex items-center gap-1 rounded-md px-1 py-1 transition-colors hover:text-foreground ${on ? 'text-foreground' : ''} ${al === 'right' ? 'flex-row-reverse' : ''}">${label}${icon(on ? (state.sort.dir === 'asc' ? 'sortUp' : 'sortDown') : 'sort', 'size-3.5 ' + (on ? '' : 'opacity-40'))}</button></th>`;
+  }).join('');
+  const body = slice.length ? slice.map(r => {
+    const tag = s && r.period === s.hi.period ? ' ' + badge('High', 'up') : s && r.period === s.lo.period ? ' ' + badge('Low', 'down') : '';
+    const col = r.chg > 0 ? 'text-up' : r.chg < 0 ? 'text-down' : 'text-muted-foreground';
+    return `<tr class="border-b transition-colors last:border-0 hover:bg-muted/50">
+      <td class="num whitespace-nowrap px-3 py-2.5 font-medium">${r.period}${tag}</td>
+      <td class="whitespace-nowrap px-3 py-2.5 text-muted-foreground">${r.dow}</td>
+      <td class="num px-3 py-2.5 text-right font-medium">${f4(r.rate)}</td>
+      <td class="num px-3 py-2.5 text-right ${col}">${sgn(r.chg)}</td>
+      <td class="num px-3 py-2.5 text-right ${col}">${r.pct == null ? '—' : sgn(r.pct, 2) + '%'}</td>
+      <td class="num whitespace-nowrap px-3 py-2.5 text-right text-muted-foreground">${fmtTs(r.fetched)}</td></tr>`;
+  }).join('') : `<tr><td colspan="6" class="h-24 text-center text-muted-foreground">No rows match “${esc(state.q)}”.</td></tr>`;
+  $('#tbl').innerHTML = `<thead class="border-b bg-muted/30"><tr>${head}</tr></thead><tbody>${body}</tbody>`;
+  $('#tbl').querySelectorAll('th button').forEach(b => b.onclick = () => {
+    const k = b.dataset.k; state.sort = { key: k, dir: state.sort.key === k && state.sort.dir === 'desc' ? 'asc' : 'desc' }; renderTable();
+  });
+  $('#pageInfo').textContent = rows.length ? `Showing ${start + 1}–${start + slice.length} of ${rows.length}` : 'No rows';
+  const btn = 'inline-flex h-8 items-center justify-center gap-1 rounded-md border bg-background px-2.5 text-sm font-medium shadow-xs transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-40';
+  $('#pager').innerHTML = `<button id="pPrev" class="${btn}" ${state.page <= 1 ? 'disabled' : ''}>${icon('chevL')}Prev</button>
+    <span class="num px-2 text-muted-foreground">${state.page} / ${pages}</span>
+    <button id="pNext" class="${btn}" ${state.page >= pages ? 'disabled' : ''}>Next${icon('chevR')}</button>`;
+  $('#pPrev').onclick = () => { state.page--; renderTable(); };
+  $('#pNext').onclick = () => { state.page++; renderTable(); };
+}
+function exportCsv() {
+  const rows = filtered();
+  const csv = ['period,weekday,rate,change,change_pct,fetched_at', ...rows.map(r => [r.period, r.dow, r.rate, r.chg ?? '', r.pct == null ? '' : r.pct.toFixed(4), r.fetched].join(','))].join('\n');
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: 'thb_usd_daily_rates.csv' });
+  a.click(); URL.revokeObjectURL(a.href); toast(`Exported ${rows.length} rows`);
+}
+
+/* ── Data quality ── */
+function renderQuality() {
+  const rows = state.all, checks = [];
+  const add = (status, title, detail) => checks.push({ status, title, detail });
+  if (state.hasTable) {
+    add(rows.length >= 20 ? 'pass' : 'warn', 'Row count', rows.length >= 20 ? `${rows.length} rows (target: 20 data points).` : `${rows.length} rows — fewer than the 20 data points the workflow targets.`);
+    const dup = rows.length - new Set(rows.map(r => r.period)).size;
+    add(dup ? 'fail' : 'pass', 'Unique periods', dup ? `${dup} duplicate period(s).` : 'Every period appears once (PRIMARY KEY).');
+    const bad = rows.filter(r => !Number.isFinite(r.rate) || r.rate <= 0);
+    add(bad.length ? 'fail' : 'pass', 'Valid numeric rates', bad.length ? `${bad.length} row(s) with null / non-positive rate.` : 'All rates are positive numbers.');
+    const out = rows.filter(r => r.rate < 20 || r.rate > 60);
+    add(out.length ? 'warn' : 'pass', 'Plausible range', out.length ? `${out.length} rate(s) outside 20–60 THB/USD: ${out.map(r => r.period).join(', ')}.` : 'All rates within 20–60 THB/USD.');
+    const wk = rows.filter(r => [0, 6].includes(pd(r.period).getUTCDay()));
+    add(wk.length ? 'warn' : 'pass', 'Business days only', wk.length ? `Weekend dates found: ${wk.map(r => r.period).join(', ')}.` : 'No Saturday/Sunday rows.');
+    const gaps = []; rows.forEach((r, i) => { if (i && daysBetween(rows[i - 1].period, r.period) > 4) gaps.push(`${rows[i - 1].period} → ${r.period}`); });
+    add(gaps.length ? 'warn' : 'pass', 'Date gaps', gaps.length ? `Gap > 4 days: ${gaps.join('; ')} (holidays or missing data).` : 'No gaps longer than a long weekend.');
+    const pairs = new Set(rows.map(r => r.pair)), apis = new Set(rows.map(r => r.api));
+    add(pairs.size === 1 && apis.size === 1 ? 'pass' : 'warn', 'Consistent source', pairs.size === 1 && apis.size === 1 ? `${[...pairs][0]} · ${[...apis][0]}` : 'Mixed currency pairs / source APIs in the table.');
+    if (rows.length) {
+      const last = rows[rows.length - 1].period, age = daysBetween(last, bkkToday());
+      add(age <= 4 ? 'pass' : 'warn', 'Freshness', `Latest data point is ${last} (${age} day${age === 1 ? '' : 's'} before today, Bangkok time).${age > 4 ? ' Run `uv run bot-fx` and click Refresh.' : ''}`);
+      const lf = rows.reduce((m, r) => r.fetched > m ? r.fetched : m, '');
+      add('info', 'Last workflow run', `${fmtTs(lf)} (Bangkok time).`);
+    }
+  } else add('fail', 'Table daily_ref_rate', 'Not found in this file.');
+
+  const score = { pass: 0, warn: 0, fail: 0, info: 0 }; checks.forEach(c => score[c.status]++);
+  $('#qualitySummary').textContent = `${score.pass} passed · ${score.warn} warnings · ${score.fail} failed`;
+  const ic = { pass: ['check', 'text-up'], warn: ['warn', 'text-warn'], fail: ['x', 'text-destructive'], info: ['db', 'text-muted-foreground'] };
+  $('#checks').innerHTML = checks.map(c => `<li class="flex items-start gap-3 px-4 py-3"><span class="mt-0.5 ${ic[c.status][1]}">${icon(ic[c.status][0], 'size-[18px]')}</span>
+    <div class="min-w-0"><div class="text-sm font-medium">${esc(c.title)}</div><div class="text-sm text-muted-foreground">${esc(c.detail)}</div></div></li>`).join('');
+
+  /* db info */
+  const schema = state.db.exec("SELECT name, type, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'")[0]?.values || [];
+  const counts = Object.fromEntries((state.tables || []).map(t => { try { return [t, state.db.exec(`SELECT COUNT(*) FROM "${t}"`)[0].values[0][0]]; } catch { return [t, '?']; } }));
+  $('#dbInfo').innerHTML = `
+    <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5">
+      <dt class="text-muted-foreground">File</dt><dd class="truncate text-right font-medium">${esc(state.name)}</dd>
+      <dt class="text-muted-foreground">Size</dt><dd class="text-right">${fmtBytes(state.size)}</dd>
+      <dt class="text-muted-foreground">Tables</dt><dd class="text-right">${(state.tables || []).map(t => `${esc(t)} <span class="text-muted-foreground">(${counts[t]})</span>`).join(', ') || '—'}</dd>
+    </dl>
+    ${schema.map(([n, t, sql]) => `<div><div class="mb-1 flex items-center gap-2 text-xs font-medium text-muted-foreground">${badge(esc(t), 'outline')} ${esc(n)}</div><pre class="scroll-thin overflow-x-auto rounded-md border bg-muted/50 p-3 font-mono text-xs leading-relaxed">${esc(sql)}</pre></div>`).join('')}`;
+}
+
+/* ── SQL console ── */
+const CHIPS = [
+  ['Latest 20 + change', 'SELECT period, rate,\n       ROUND(rate - LAG(rate) OVER (ORDER BY period), 4) AS change\nFROM daily_ref_rate\nORDER BY period DESC\nLIMIT 20;'],
+  ['Biggest daily moves', 'WITH d AS (\n  SELECT period, rate, rate - LAG(rate) OVER (ORDER BY period) AS chg\n  FROM daily_ref_rate\n)\nSELECT period, rate, ROUND(chg, 4) AS chg\nFROM d WHERE chg IS NOT NULL\nORDER BY ABS(chg) DESC\nLIMIT 5;'],
+  ['Weekday averages', "SELECT CASE strftime('%w', period) WHEN '1' THEN 'Mon' WHEN '2' THEN 'Tue' WHEN '3' THEN 'Wed' WHEN '4' THEN 'Thu' WHEN '5' THEN 'Fri' ELSE 'Weekend' END AS weekday,\n       ROUND(AVG(rate), 4) AS avg_rate, COUNT(*) AS n\nFROM daily_ref_rate\nGROUP BY strftime('%w', period)\nORDER BY strftime('%w', period);"],
+  ['Monthly summary', "SELECT substr(period, 1, 7) AS month, ROUND(AVG(rate), 4) AS avg_rate,\n       MIN(rate) AS low, MAX(rate) AS high, COUNT(*) AS n\nFROM daily_ref_rate\nGROUP BY month\nORDER BY month DESC;"],
+  ['Schema', "SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%';"],
+];
+function initSql() {
+  $('#sqlChips').innerHTML = CHIPS.map(([l], i) => `<button data-i="${i}" class="inline-flex h-7 items-center rounded-md border bg-background px-2.5 text-xs font-medium shadow-xs transition-colors hover:bg-accent">${l}</button>`).join('');
+  $('#sqlChips').querySelectorAll('button').forEach(b => b.onclick = () => { $('#sql').value = CHIPS[+b.dataset.i][1]; runSql(); });
+  $('#btnRun').innerHTML = `${icon('play', 'size-3.5')}Run query`;
+  if (!$('#sql').value) $('#sql').value = CHIPS[0][1];
+  $('#sqlOut').innerHTML = ''; $('#sqlMeta').textContent = '';
+}
+function runSql() {
+  const sql = $('#sql').value.trim(), out = $('#sqlOut'), meta = $('#sqlMeta');
+  if (!sql) return;
+  const first = sql.replace(/--.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '').trim().split(/\s+/)[0]?.toLowerCase();
+  if (!['select', 'with', 'pragma', 'explain', 'values'].includes(first)) {
+    out.innerHTML = `<div class="rounded-md border border-destructive/50 px-3 py-2 text-sm text-destructive">Read-only console: only SELECT / WITH / PRAGMA / EXPLAIN are allowed.</div>`; meta.textContent = ''; return;
+  }
+  const t0 = performance.now();
+  try {
+    const res = state.db.exec(sql), ms = (performance.now() - t0).toFixed(1);
+    if (!res.length) { out.innerHTML = '<p class="text-sm text-muted-foreground">Query ran, no rows returned.</p>'; meta.textContent = `0 rows · ${ms} ms`; return; }
+    const { columns, values } = res[res.length - 1], shown = values.slice(0, 500);
+    out.innerHTML = `<div class="scroll-thin max-h-[420px] overflow-auto rounded-md border"><table class="w-full text-sm"><thead class="sticky top-0 border-b bg-muted"><tr>${columns.map(c => `<th class="h-9 whitespace-nowrap px-3 text-left font-medium text-muted-foreground">${esc(c)}</th>`).join('')}</tr></thead>
+      <tbody>${shown.map(r => `<tr class="border-b last:border-0 hover:bg-muted/50">${r.map(c => `<td class="num max-w-[28rem] truncate px-3 py-2 ${c === null ? 'text-muted-foreground' : ''}" title="${esc(c)}">${c === null ? 'NULL' : esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    meta.textContent = `${values.length} row${values.length === 1 ? '' : 's'}${values.length > 500 ? ' (first 500 shown)' : ''} · ${ms} ms`;
+  } catch (e) {
+    out.innerHTML = `<div class="rounded-md border border-destructive/50 px-3 py-2 font-mono text-sm text-destructive">${esc(e.message || e)}</div>`; meta.textContent = '';
+  }
+}
+
+/* ═════════════════════════ wiring ═════════════════════════ */
+function setTheme(dark) {
+  document.documentElement.classList.toggle('dark', dark);
+  localStorage.setItem('theme', dark ? 'dark' : 'light');
+  $('#btnTheme').innerHTML = icon(dark ? 'sun' : 'moon');
+  if (state.db) renderCharts();
+}
+
+$('#btnOpen').onclick = openFile;
+$('#btnRefresh').onclick = refreshFile;
+$('#btnTheme').onclick = () => setTheme(!isDark());
+$('#dropzone').onclick = e => { if (!e.target.closest('#btnCopyPath')) openFile(); };
+$('#btnCopyPath').onclick = e => { e.stopPropagation(); navigator.clipboard?.writeText($('#dbPathHint').textContent.replace('~', '/Users/fankrits')).then(() => toast('Path copied')); };
+$('#fileInput').onchange = e => { const f = e.target.files[0]; if (f) loadFile(f); e.target.value = ''; };
+$('#chkMA').onchange = e => { state.ma = e.target.checked; const c = state.charts.trend; if (c) { c.setDatasetVisibility(1, state.ma); c.update(); } };
+$('#chkAvg').onchange = e => { state.avg = e.target.checked; const c = state.charts.trend; if (c) { c.setDatasetVisibility(2, state.avg); c.update(); } };
+$('#q').oninput = e => { state.q = e.target.value; state.page = 1; renderTable(); };
+$('#pageSize').onchange = e => { state.pageSize = +e.target.value; state.page = 1; renderTable(); };
+$('#btnCsv').onclick = exportCsv;
+$('#btnRun').onclick = runSql;
+$('#sql').addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); runSql(); } });
+$('#btnCsv').innerHTML = `${icon('download')}Export CSV`;
+$('#searchIcon').innerHTML = icon('search');
+$('#emptyIcon').innerHTML = icon('db', 'size-6');
+
+/* drag & drop anywhere */
+let dragDepth = 0;
+addEventListener('dragenter', e => { e.preventDefault(); dragDepth++; $('#dropOverlay').classList.remove('hidden'); $('#dropOverlay').classList.add('flex'); });
+addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; $('#dropOverlay').classList.add('hidden'); $('#dropOverlay').classList.remove('flex'); } });
+addEventListener('dragover', e => e.preventDefault());
+addEventListener('drop', async e => {
+  e.preventDefault(); dragDepth = 0; $('#dropOverlay').classList.add('hidden'); $('#dropOverlay').classList.remove('flex');
+  const item = e.dataTransfer.items?.[0]; let handle = null;
+  try { handle = await item?.getAsFileSystemHandle?.(); } catch { /* unsupported */ }
+  const file = e.dataTransfer.files[0]; if (file) loadFile(file, handle?.kind === 'file' ? handle : null);
+});
+
+/* init */
+setTheme(localStorage.getItem('theme') ? localStorage.getItem('theme') === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches);
+renderHeader();
+boot().catch(e => { $('#empty').classList.remove('hidden'); showAlert('Startup failed', esc(e.message || e)); });
+</script>
+</body>
+</html>

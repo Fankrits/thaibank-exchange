@@ -106,6 +106,9 @@ db: /path/to/project/.venv/bot_api_daily_Kritsada_Nhanjeing.db
   "SELECT period, rate FROM daily_ref_rate ORDER BY period DESC LIMIT 20;"</code></pre>
 <div class="note">ไฟล์ DB อยู่ใน <code>.venv</code> ตามโจทย์ — การลบ/สร้าง <code>.venv</code> ใหม่ (เช่น <code>rm -rf .venv</code>) จะทำให้ข้อมูลหาย ควรสำรองไฟล์ก่อน</div>
 
+<h3>ดูข้อมูลด้วย Dashboard</h3>
+<p>เปิดไฟล์ <code>docs/dashboard.html</code> ในเบราว์เซอร์ (Chrome/Edge แนะนำ) แล้วกด <b>Open .db</b> เลือกไฟล์ฐานข้อมูล — ประมวลผลในเครื่อง ไม่อัปโหลดไฟล์ไปไหน มี KPI, กราฟ, ตาราง (ค้นหา/เรียง/ส่งออก CSV), ตรวจคุณภาพข้อมูล และ SQL console แบบอ่านอย่างเดียว หลังรัน <code>uv run bot-fx</code> ใหม่ให้กด <b>Refresh</b></p>
+
 <h2 id="options">7. ตัวเลือก</h2>
 <table>
   <tr><th>Option / ENV</th><th>ค่าเริ่มต้น</th><th>คำอธิบาย</th></tr>

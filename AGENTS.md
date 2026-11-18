@@ -15,6 +15,7 @@ Bank of Thailand API and append them to a SQLite file. Managed with **uv**.
 - `workflow.py` — fetch window -> keep latest N -> save
 - `cli.py` — argparse entry point (`bot-fx`)
 - `docs/user-guide.html` — end-user manual (Thai)
+- `docs/dashboard.html` — single-file viewer for the DB (sql.js + Chart.js, shadcn zinc tokens/classes on Tailwind v4 CDN); reads table `daily_ref_rate`, so update it if the schema changes
 
 ## Facts that must stay true
 - Endpoint: `https://gateway.api.bot.or.th/Stat-ReferenceRate/v2/DAILY_REF_RATE/`, params `start_period`, `end_period` (`YYYY-MM-DD`).
