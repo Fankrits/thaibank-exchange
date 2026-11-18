@@ -8,12 +8,28 @@
   :root{--fg:#1b1f24;--muted:#5b6672;--bg:#fafaf8;--card:#fff;--line:#e3e1db;--accent:#1f6f4a;--code:#f2f1ec}
   *{box-sizing:border-box}
   body{margin:0;font:16px/1.7 "Sarabun","Noto Sans Thai",system-ui,sans-serif;color:var(--fg);background:var(--bg)}
-  .wrap{max-width:860px;margin:0 auto;padding:32px 20px 80px}
+  html{scroll-behavior:smooth}
+  .wrap{max-width:1120px;margin:0 auto;padding:32px 20px 80px}
+  .layout{display:grid;grid-template-columns:220px minmax(0,1fr);gap:40px;align-items:start;margin-top:8px}
+  .content{min-width:0}
+  h2,h3{scroll-margin-top:20px}
   header{border-bottom:2px solid var(--accent);padding-bottom:16px;margin-bottom:8px}
   h1{margin:0 0 4px;font-size:1.8rem} h2{margin-top:2.4rem;font-size:1.3rem;border-left:4px solid var(--accent);padding-left:10px}
   p.sub{margin:0;color:var(--muted)}
-  nav{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 18px;margin:20px 0}
-  nav a{color:var(--accent);text-decoration:none;margin-right:14px;white-space:nowrap}
+  .side{position:sticky;top:20px;max-height:calc(100vh - 40px);overflow:auto;padding-top:14px}
+  .side-title{font-size:.75rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:0 12px 8px}
+  .side nav{display:flex;flex-direction:column;border-left:1px solid var(--line)}
+  .side nav a{color:var(--muted);text-decoration:none;font-size:.92rem;line-height:1.35;padding:7px 12px;margin-left:-1px;border-left:2px solid transparent}
+  .side nav a:hover{color:var(--fg)}
+  .side nav a.active{color:var(--accent);border-left-color:var(--accent);font-weight:600;background:linear-gradient(90deg,#1f6f4a14,transparent)}
+  @media (max-width:860px){
+    .layout{grid-template-columns:1fr;gap:8px}
+    .side{position:static;max-height:none;padding-top:8px}
+    .side nav{flex-direction:row;flex-wrap:wrap;border-left:0;gap:4px 6px}
+    .side nav a{border:1px solid var(--line);border-radius:999px;padding:3px 10px;margin:0;background:var(--card)}
+    .side nav a.active{border-color:var(--accent)}
+    table{display:block;overflow-x:auto}
+  }
   pre,code{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:.9em}
   code{background:var(--code);padding:1px 5px;border-radius:4px}
   pre{background:#1d2127;color:#e8e6df;padding:14px 16px;border-radius:8px;overflow:auto}
@@ -31,12 +47,25 @@
   <h1>คู่มือการใช้งาน</h1>
   <p class="sub">Python workflow ดึงอัตราแลกเปลี่ยน THB/USD รายวันจาก Bank of Thailand API เก็บลง SQLite</p>
 </header>
+<div class="layout">
+<aside class="side" aria-label="สารบัญ">
+  <div class="side-title">สารบัญ</div>
+  <nav id="toc">
+    <a href="#overview">1. ภาพรวม</a>
+    <a href="#prereq">2. สิ่งที่ต้องมี</a>
+    <a href="#token">3. รับ API Token</a>
+    <a href="#setup">4. ติดตั้ง</a>
+    <a href="#run">5. การรัน</a>
+    <a href="#db">6. ฐานข้อมูล</a>
+    <a href="#dashboard">7. ดูข้อมูลด้วย Dashboard</a>
+    <a href="#options">8. ตัวเลือก</a>
+    <a href="#schedule">9. รันอัตโนมัติ (ทางเลือก)</a>
+    <a href="#trouble">10. แก้ปัญหา</a>
+  </nav>
+</aside>
+<main class="content">
 
-<nav>
-  <a href="#overview">ภาพรวม</a><a href="#prereq">สิ่งที่ต้องมี</a><a href="#token">รับ API Token</a>
-  <a href="#setup">ติดตั้ง</a><a href="#run">การรัน</a><a href="#db">ฐานข้อมูล</a>
-  <a href="#options">ตัวเลือก</a><a href="#schedule">รันอัตโนมัติ</a><a href="#trouble">แก้ปัญหา</a>
-</nav>
+
 
 <h2 id="overview">1. ภาพรวม</h2>
 <table>
@@ -106,11 +135,11 @@ db: /path/to/project/.venv/bot_api_daily_Kritsada_Nhanjeing.db
   "SELECT period, rate FROM daily_ref_rate ORDER BY period DESC LIMIT 20;"</code></pre>
 <div class="note">ไฟล์ DB อยู่ใน <code>.venv</code> ตามโจทย์ — การลบ/สร้าง <code>.venv</code> ใหม่ (เช่น <code>rm -rf .venv</code>) จะทำให้ข้อมูลหาย ควรสำรองไฟล์ก่อน</div>
 
-<h3>ดูข้อมูลด้วย Dashboard</h3>
+<h2 id="dashboard">7. ดูข้อมูลด้วย Dashboard</h2>
 <p>เปิดไฟล์ <code>docs/dashboard.html</code> ในเบราว์เซอร์ (Chrome/Edge แนะนำ) แล้วกด <b>Open .db</b> เลือกไฟล์ฐานข้อมูล — ประมวลผลในเครื่อง ไม่อัปโหลดไฟล์ไปไหน มี KPI, กราฟ, ตาราง (ค้นหา/เรียง/ส่งออก CSV), ตรวจคุณภาพข้อมูล และ SQL console แบบอ่านอย่างเดียว หลังรัน <code>uv run bot-fx</code> ใหม่ให้กด <b>Refresh</b></p>
 <p><b>เปิดอัตโนมัติ:</b> <code>uv run bot-fx-dashboard</code> (เปิดเบราว์เซอร์พร้อมโหลด DB ให้เลย) หรือ <code>uv run bot-fx --dashboard</code> (ดึงข้อมูลใหม่แล้วเปิด) — เซิร์ฟเวอร์รันบน 127.0.0.1 เท่านั้น กด Ctrl+C เพื่อหยุด</p>
 
-<h2 id="options">7. ตัวเลือก</h2>
+<h2 id="options">8. ตัวเลือก</h2>
 <table>
   <tr><th>Option / ENV</th><th>ค่าเริ่มต้น</th><th>คำอธิบาย</th></tr>
   <tr><td><code>BOT_API_TOKEN</code></td><td>—</td><td>จำเป็น. API key ของ BOT</td></tr>
@@ -120,11 +149,11 @@ db: /path/to/project/.venv/bot_api_daily_Kritsada_Nhanjeing.db
   <tr><td><code>BOT_DB_PATH</code> / <code>--db-path</code></td><td><code>.venv/…</code></td><td>เปลี่ยนที่เก็บไฟล์ DB</td></tr>
 </table>
 
-<h2 id="schedule">8. รันอัตโนมัติ (ทางเลือก)</h2>
+<h2 id="schedule">9. รันอัตโนมัติ (ทางเลือก)</h2>
 <p>BOT เผยแพร่ข้อมูลทุกวันทำการเวลา 18:00 น. ตัวอย่าง cron (จันทร์–ศุกร์ 18:30 น. เวลาไทย):</p>
 <pre><code>30 18 * * 1-5  cd /path/to/bot-fx-workflow &amp;&amp; uv run bot-fx &gt;&gt; run.log 2&gt;&amp;1</code></pre>
 
-<h2 id="trouble">9. แก้ปัญหา</h2>
+<h2 id="trouble">10. แก้ปัญหา</h2>
 <table>
   <tr><th>อาการ</th><th>สาเหตุ / วิธีแก้</th></tr>
   <tr><td><code>BOT_API_TOKEN is not set</code></td><td>ยังไม่ได้ตั้งค่าใน <code>.env</code> หรือ environment</td></tr>
@@ -135,5 +164,16 @@ db: /path/to/project/.venv/bot_api_daily_Kritsada_Nhanjeing.db
   <tr><td>ไม่พบไฟล์ DB</td><td>ดูพาธจากบรรทัด <code>db:</code> ตอนรัน; ไฟล์ซ่อนอยู่ใน <code>.venv/</code></td></tr>
 </table>
 
-</div></body>
+</main>
+</div>
+</div>
+<script>
+(function(){var links=[].slice.call(document.querySelectorAll("#toc a"));
+var secs=links.map(function(a){return document.getElementById(a.getAttribute("href").slice(1))});
+function spy(){var y=window.scrollY+120,cur=0;secs.forEach(function(el,i){if(el.offsetTop<=y)cur=i});
+if(window.innerHeight+window.scrollY>=document.body.scrollHeight-4)cur=secs.length-1;
+links.forEach(function(a,i){a.classList.toggle("active",i===cur)})}
+addEventListener("scroll",spy,{passive:true});addEventListener("resize",spy);spy();})();
+</script>
+</body>
 </html>
