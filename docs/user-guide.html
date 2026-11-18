@@ -50,8 +50,8 @@
 </table>
 <p>ขั้นตอนการทำงานของโปรแกรมในหนึ่งครั้งที่รัน:</p>
 <ol>
-  <li>คำนวณช่วงวันที่: วันนี้ (เวลาไทย) ย้อนหลัง 45 วันปฏิทิน (ครอบคลุมเสาร์-อาทิตย์และวันหยุดนักขัตฤกษ์)</li>
-  <li>เรียก <code>GET DAILY_REF_RATE/?start_period=…&amp;end_period=…</code> พร้อม header <code>Authorization</code> (1 request)</li>
+  <li>คำนวณช่วงวันที่: วันนี้ (เวลาไทย) ย้อนหลังได้สูงสุด 45 วันปฏิทิน (ครอบคลุมเสาร์-อาทิตย์และวันหยุดนักขัตฤกษ์)</li>
+  <li>เรียก <code>GET DAILY_REF_RATE/?start_period=…&amp;end_period=…</code> พร้อม header <code>Authorization</code> — BOT จำกัดช่วงวันที่ <b>ไม่เกิน 31 วันต่อ request</b> โปรแกรมจึงแบ่งเป็นช่วงละ ≤31 วันและย้อนไปเรื่อย ๆ จนได้ครบ 20 จุด (ปกติใช้ 1 request)</li>
   <li>เลือกเฉพาะ <b>20 วันล่าสุด</b> ที่มีข้อมูล</li>
   <li>บันทึกลง SQLite: วันใหม่ถูก <b>append</b>, วันที่มีอยู่แล้วและค่าเท่าเดิมจะไม่ซ้ำ, ถ้า BOT แก้ตัวเลขจะอัปเดตค่านั้น</li>
 </ol>
@@ -112,7 +112,7 @@ db: /path/to/project/.venv/bot_api_daily_Kritsada_Nhanjeing.db
   <tr><td><code>BOT_API_TOKEN</code></td><td>—</td><td>จำเป็น. API key ของ BOT</td></tr>
   <tr><td><code>APPLICANT_NAME</code> / <code>--applicant</code></td><td><code>Kritsada_Nhanjeing</code></td><td>ชื่อผู้สมัครภาษาอังกฤษในชื่อไฟล์ DB</td></tr>
   <tr><td><code>--days N</code></td><td>20</td><td>จำนวน data point รายวัน</td></tr>
-  <tr><td><code>--lookback-days N</code></td><td>45</td><td>จำนวนวันปฏิทินที่ขอจาก API (เพิ่มถ้าได้ไม่ครบ)</td></tr>
+  <tr><td><code>--lookback-days N</code></td><td>45</td><td>จำนวนวันปฏิทินสูงสุดที่ย้อนหลัง (แบ่งเรียกช่วงละ ≤31 วัน; เพิ่มถ้าได้ไม่ครบ)</td></tr>
   <tr><td><code>BOT_DB_PATH</code> / <code>--db-path</code></td><td><code>.venv/…</code></td><td>เปลี่ยนที่เก็บไฟล์ DB</td></tr>
 </table>
 
@@ -126,6 +126,7 @@ db: /path/to/project/.venv/bot_api_daily_Kritsada_Nhanjeing.db
   <tr><td><code>BOT_API_TOKEN is not set</code></td><td>ยังไม่ได้ตั้งค่าใน <code>.env</code> หรือ environment</td></tr>
   <tr><td><code>HTTP 401 … Authorization field missing</code></td><td>token ว่าง/ผิด หรือยังไม่ได้ Subscribe ผลิตภัณฑ์ Exchange Rates</td></tr>
   <tr><td><code>HTTP 429</code></td><td>เกินโควตา 200 calls/ชั่วโมง — โปรแกรมจะ retry เอง รอสักครู่แล้วรันใหม่</td></tr>
+  <tr><td><code>HTTP 400 … Exceed limit period</code></td><td>ช่วงวันที่ต่อ request เกิน 31 วัน — เวอร์ชันนี้แบ่งช่วงให้อัตโนมัติแล้ว</td></tr>
   <tr><td><code>warning: only N of 20 data points</code></td><td>ช่วงวันหยุดยาว — เพิ่ม <code>--lookback-days 60</code></td></tr>
   <tr><td>ไม่พบไฟล์ DB</td><td>ดูพาธจากบรรทัด <code>db:</code> ตอนรัน; ไฟล์ซ่อนอยู่ใน <code>.venv/</code></td></tr>
 </table>

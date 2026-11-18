@@ -95,3 +95,17 @@ def test_retries_5xx_then_succeeds(monkeypatch):
     s = FakeSession(FakeResp(503, text="x"), FakeResp(payload=payload(business_days(2))))
     assert len(fetch_daily_ref_rate("t", date(2026, 10, 1), date(2026, 10, 2), session=s)) == 2
     assert len(s.calls) == 2
+
+
+def test_windows_never_exceed_31_days_and_stop_early(tmp_path):
+    # window 1 has only 12 points -> a 2nd window is requested; 3rd is not needed
+    s = FakeSession(
+        FakeResp(payload=payload(business_days(12))),
+        FakeResp(payload=payload([{"period": f"2026-09-{d:02d}", "rate": "31.5"} for d in range(20, 10, -1)])),
+    )
+    points, r = workflow.run(settings(tmp_path), today=date(2026, 11, 18), session=s)
+    assert len(s.calls) == 2 and len(points) == 20 and r.inserted == 20
+    for _, params, _ in s.calls:
+        a, b = date.fromisoformat(params["start_period"]), date.fromisoformat(params["end_period"])
+        assert (b - a).days + 1 <= 31
+    assert date.fromisoformat(s.calls[1][1]["end_period"]) < date.fromisoformat(s.calls[0][1]["start_period"])

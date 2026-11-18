@@ -19,7 +19,7 @@ Bank of Thailand API and append them to a SQLite file. Managed with **uv**.
 ## Facts that must stay true
 - Endpoint: `https://gateway.api.bot.or.th/Stat-ReferenceRate/v2/DAILY_REF_RATE/`, params `start_period`, `end_period` (`YYYY-MM-DD`).
 - Auth: raw API key in the `Authorization` header (no `Bearer`). Read from `BOT_API_TOKEN` (env or `.env`). Never commit it.
-- BOT publishes business days only, so the workflow requests a 45-calendar-day window and keeps the **latest 20** points.
+- BOT publishes business days only and **rejects ranges over 31 days** (HTTP 400 "Exceed limit period"). The workflow walks backwards in <=31-day windows (max 45 days back) until it has 20 points, and keeps the **latest 20**.
 - DB file: `.venv/bot_api_daily_{Applicant_Name_Eng}.db` (name from `APPLICANT_NAME` / `--applicant`). Rows are appended; re-runs are idempotent (insert new `period`, update only if rate changed).
 - Rate limit of the "Exchange Rates Plan": 200 calls / hour. One run = 1 call.
 
